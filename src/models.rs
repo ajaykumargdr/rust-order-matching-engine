@@ -12,8 +12,7 @@ pub struct Order {
     pub qty: u64,
 }
 
-#[allow(unused)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Fill {
     pub maker_order_id: u64,
     pub taker_order_id: u64,

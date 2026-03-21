@@ -1,27 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Deserialize)]
+use crate::models::Fill;
+
+#[derive(Clone, Deserialize, Serialize)]
 pub struct CreateOrderRequest {
     pub side: String,
     pub price: u64,
     pub qty: u64,
 }
 
-#[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CreateOrderResponse {
     pub order_id: u64,
-    pub fills: Vec<FillResponse>,
+    pub fills: Vec<Fill>,
 }
 
-#[derive(Clone, Serialize)]
-pub struct FillResponse {
-    pub maker_order_id: u64,
-    pub taker_order_id: u64,
+#[derive(Serialize, Clone, Deserialize)]
+pub struct OrderLevel {
     pub price: u64,
     pub qty: u64,
 }
@@ -33,7 +28,24 @@ pub struct OrderBookResponse {
 }
 
 #[derive(Serialize)]
-pub struct OrderLevel {
-    pub price: u64,
-    pub qty: u64,
+pub struct ErrorResponse {
+    pub error: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum SyncMessage {
+    Snapshot {
+        bids: Vec<OrderLevel>,
+        asks: Vec<OrderLevel>,
+    },
+    BidUpdate {
+        price: u64,
+        qty: u64,
+    },
+    AskUpdate {
+        price: u64,
+        qty: u64,
+    },
+    Fill(Fill),
 }
