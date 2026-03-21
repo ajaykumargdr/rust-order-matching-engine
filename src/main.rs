@@ -1,31 +1,24 @@
+mod api;
 mod engine;
 mod models;
 mod orderbook;
+mod state;
 
-use models::{Order, Side};
-use orderbook::OrderBook;
+use axum::{
+    Router,
+    routing::{get, post},
+};
 
-fn main() {
-    let mut book = OrderBook::new();
+#[tokio::main]
+async fn main() {
+    let primary_url = "localhost:3000".to_string();
+    let state = state::AppState::new();
 
-    let sell_order = Order {
-        id: 1,
-        side: Side::Sell,
-        price: 90,
-        qty: 5,
-    };
+    let app: Router = Router::new()
+        .route("/orders", post(api::create_order))
+        .route("/orderbook", get(api::get_orderbook))
+        .with_state(state);
 
-    engine::process_order(sell_order, &mut book);
-
-    let buy_order = Order {
-        id: 2,
-        side: Side::Buy,
-        price: 100,
-        qty: 10,
-    };
-
-    let fills = engine::process_order(buy_order, &mut book);
-
-    println!("Fills: {:?}", fills);
-    println!("Remaining OrderBook: {:?}", book);
+    let listener = tokio::net::TcpListener::bind(primary_url).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
