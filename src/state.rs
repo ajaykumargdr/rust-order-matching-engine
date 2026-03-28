@@ -52,3 +52,48 @@ impl AppState {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{AppState, Config};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tokio::task::JoinSet;
+
+    #[tokio::test]
+    async fn next_order_id_sequential() {
+        let config = Config::from_env();
+        let state = Arc::new(AppState::new(config));
+        let mut tasks: JoinSet<()> = JoinSet::new();
+
+        for _ in 0..5 {
+            let state = state.clone();
+            tasks.spawn(async move {
+                state.next_order_id();
+            });
+        }
+
+        let _ = tasks.join_all().await;
+
+        assert_eq!(state.next_order_id(), 5);
+    }
+
+    #[tokio::test]
+    async fn next_order_id_unique() {
+        let config = Config::from_env();
+        let state = Arc::new(AppState::new(config));
+        let mut tasks: JoinSet<u64> = JoinSet::new();
+        let mut unique_ids: HashSet<u64> = HashSet::new();
+
+        for _ in 0..5 {
+            let state = state.clone();
+            tasks.spawn(async move { state.next_order_id() });
+        }
+
+        while let Some(id) = tasks.join_next().await {
+            unique_ids.insert(id.unwrap());
+        }
+
+        assert_eq!(unique_ids.len(), 5);
+    }
+}
