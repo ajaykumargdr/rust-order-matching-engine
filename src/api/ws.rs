@@ -184,7 +184,7 @@ async fn handle_primary_ws(
                                     price: level.price,
                                     qty: level.qty,
                                 };
-                                ob.add_order(order);
+                                ob.add_order(order).unwrap();
                             }
                             for level in asks {
                                 let order = Order {
@@ -193,7 +193,7 @@ async fn handle_primary_ws(
                                     price: level.price,
                                     qty: level.qty,
                                 };
-                                ob.add_order(order);
+                                ob.add_order(order).unwrap();
                             }
                         }
                     }

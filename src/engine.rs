@@ -83,7 +83,7 @@ pub fn process_order(mut incoming: Order, book: &mut OrderBook) -> ProcessResult
             // Add resting order
             if incoming.qty > 0 {
                 let price = incoming.price;
-                book.add_order(incoming);
+                book.add_order(incoming).unwrap();
 
                 // Calculate total qty at this price level
                 let qty: u64 = book
@@ -165,7 +165,7 @@ pub fn process_order(mut incoming: Order, book: &mut OrderBook) -> ProcessResult
             // Add resting order
             if incoming.qty > 0 {
                 let price = incoming.price;
-                book.add_order(incoming.clone());
+                book.add_order(incoming.clone()).unwrap();
 
                 // Calculate total qty at this price level
                 let qty: u64 = book
