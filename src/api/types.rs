@@ -4,6 +4,7 @@ use crate::models::Fill;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CreateOrderRequest {
+    pub symbol: String,
     pub side: String,
     pub price: u64,
     pub qty: u64,
@@ -23,6 +24,7 @@ pub struct OrderLevel {
 
 #[derive(Serialize)]
 pub struct OrderBookResponse {
+    pub symbol: String,
     pub bids: Vec<OrderLevel>,
     pub asks: Vec<OrderLevel>,
 }
@@ -36,16 +38,27 @@ pub struct ErrorResponse {
 #[serde(tag = "type")]
 pub enum SyncMessage {
     Snapshot {
+        symbol: String,
         bids: Vec<OrderLevel>,
         asks: Vec<OrderLevel>,
     },
     BidUpdate {
+        symbol: String,
         price: u64,
         qty: u64,
     },
     AskUpdate {
+        symbol: String,
         price: u64,
         qty: u64,
     },
-    Fill(Fill),
+    Fill {
+        symbol: String,
+        data: Fill,
+    },
+}
+
+#[derive(Deserialize)]
+pub struct SymbolQuery {
+    pub symbol: String,
 }

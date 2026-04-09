@@ -1,7 +1,11 @@
 pub mod types;
 pub mod ws;
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::StatusCode,
+};
 
 use crate::{
     engine,
@@ -29,6 +33,19 @@ pub async fn create_order(
         }
     };
 
+    // Validate symbol
+    if !state.config.is_valid_symbol(&payload.symbol) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!(
+                    "invalid symbol: {}. Valid symbols: {:?}",
+                    payload.symbol, state.config.symbols
+                ),
+            }),
+        ));
+    }
+
     if payload.price == 0 || payload.qty == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -39,7 +56,7 @@ pub async fn create_order(
     }
 
     if state.config.is_primary {
-        let mut ob = state.orderbook.lock().await;
+        let mut engine = state.engine.lock().await;
         let order_id = state.next_order_id();
 
         let order = Order {
@@ -49,23 +66,35 @@ pub async fn create_order(
             qty: payload.qty,
         };
 
-        let result = engine::process_order(order, &mut ob);
-        drop(ob);
+        let book = engine.get_orderbook_mut(&payload.symbol).ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "orderbook not found".into(),
+            }),
+        ))?;
+
+        let result = engine::process_order(order, book);
+        drop(engine);
 
         // Broadcast fills to both channels in single iteration
         for fill in &result.fills {
             let _ = state.fills_tx.send(fill.clone()); // External WS clients
-            let _ = state.sync_tx.send(SyncMessage::Fill(fill.clone())); // SECONDARY sync
+            let _ = state.sync_tx.send(SyncMessage::Fill {
+                symbol: payload.symbol.clone(),
+                data: fill.clone(),
+            }); // SECONDARY sync
         }
 
         // Broadcast deltas to SECONDARY sync channel
         for delta in &result.deltas {
             let msg = match delta.side {
                 Side::Buy => SyncMessage::BidUpdate {
+                    symbol: payload.symbol.clone(),
                     price: delta.price,
                     qty: delta.qty,
                 },
                 Side::Sell => SyncMessage::AskUpdate {
+                    symbol: payload.symbol.clone(),
                     price: delta.price,
                     qty: delta.qty,
                 },
@@ -120,8 +149,17 @@ pub async fn create_order(
 }
 
 /// Returns (bids, asks)
-async fn orderbook_state(state: &AppState) -> (Vec<OrderLevel>, Vec<OrderLevel>) {
-    let ob = state.orderbook.lock().await;
+async fn orderbook_state(
+    state: &AppState,
+    symbol: &str,
+) -> Result<(Vec<OrderLevel>, Vec<OrderLevel>), (StatusCode, Json<ErrorResponse>)> {
+    let engine = state.engine.lock().await;
+    let ob = engine.get_orderbook(symbol).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            error: format!("orderbook for symbol '{}' not found", symbol),
+        }),
+    ))?;
 
     let bids = ob
         .bids
@@ -142,10 +180,31 @@ async fn orderbook_state(state: &AppState) -> (Vec<OrderLevel>, Vec<OrderLevel>)
         })
         .collect();
 
-    (bids, asks)
+    Ok((bids, asks))
 }
 
-pub async fn get_orderbook(State(state): State<AppState>) -> Json<OrderBookResponse> {
-    let (bids, asks) = orderbook_state(&state).await;
-    Json(OrderBookResponse { bids, asks })
+pub async fn get_orderbook(
+    State(state): State<AppState>,
+    Query(query): Query<SymbolQuery>,
+) -> Result<Json<OrderBookResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate symbol
+    if !state.config.is_valid_symbol(&query.symbol) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!(
+                    "invalid symbol: {}. Valid symbols: {:?}",
+                    query.symbol, state.config.symbols
+                ),
+            }),
+        ));
+    }
+
+    let (bids, asks) = orderbook_state(&state, &query.symbol).await?;
+
+    Ok(Json(OrderBookResponse {
+        symbol: query.symbol,
+        bids,
+        asks,
+    }))
 }

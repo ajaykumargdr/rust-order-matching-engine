@@ -71,17 +71,25 @@ async fn handle_sync_socket(socket: WebSocket, state: AppState) {
     // SECONDARY instances subscribe to sync channel (fills + deltas)
     let mut rx = state.sync_tx.subscribe();
 
-    // Send initial snapshot on connect
-    let orderbook_state = super::orderbook_state(&state).await;
-    let snapshot = SyncMessage::Snapshot {
-        bids: orderbook_state.0,
-        asks: orderbook_state.1,
-    };
+    // Send initial snapshot on connect - send snapshots for all symbols
+    let engine = state.engine.lock().await;
+    // Todo(refactor): Optimize
+    for (symbol, _book) in &engine.books {
+        let orderbook_state = super::orderbook_state(&state, symbol).await;
+        if let Ok((bids, asks)) = orderbook_state {
+            let snapshot = SyncMessage::Snapshot {
+                symbol: symbol.clone(),
+                bids,
+                asks,
+            };
 
-    let json = serde_json::to_string(&snapshot).ok();
-    if let Some(text) = json {
-        let _ = sender.send(Message::Text(text.into())).await;
+            let json = serde_json::to_string(&snapshot).ok();
+            if let Some(text) = json {
+                let _ = sender.send(Message::Text(text.into())).await;
+            }
+        }
     }
+    drop(engine);
 
     loop {
         tokio::select! {
@@ -160,40 +168,46 @@ async fn handle_primary_ws(
             Ok(WsMessage::Text(text)) => {
                 if let Ok(sync_msg) = serde_json::from_str::<SyncMessage>(&text) {
                     match &sync_msg {
-                        SyncMessage::Fill(fill) => {
+                        SyncMessage::Fill { symbol: _, data } => {
                             // Forward fills to local WebSocket clients
-                            let _ = state.fills_tx.send(fill.clone());
+                            let _ = state.fills_tx.send(data.clone());
                         }
-                        SyncMessage::BidUpdate { price, qty } => {
-                            let mut ob = state.orderbook.lock().await;
-                            update_level(&mut ob, Side::Buy, *price, *qty);
-                        }
-                        SyncMessage::AskUpdate { price, qty } => {
-                            let mut ob = state.orderbook.lock().await;
-                            update_level(&mut ob, Side::Sell, *price, *qty);
-                        }
-                        SyncMessage::Snapshot { bids, asks } => {
-                            let mut ob = state.orderbook.lock().await;
-                            *ob = OrderBook::new();
-
-                            // Note: For Secondary instances we only store order price and total quantity
-                            for level in bids {
-                                let order = Order {
-                                    id: 0,
-                                    side: Side::Buy,
-                                    price: level.price,
-                                    qty: level.qty,
-                                };
-                                ob.add_order(order).unwrap();
+                        SyncMessage::BidUpdate { symbol, price, qty } => {
+                            let mut engine = state.engine.lock().await;
+                            if let Some(book) = engine.get_orderbook_mut(symbol) {
+                                update_level(book, Side::Buy, *price, *qty);
                             }
-                            for level in asks {
-                                let order = Order {
-                                    id: 0,
-                                    side: Side::Sell,
-                                    price: level.price,
-                                    qty: level.qty,
-                                };
-                                ob.add_order(order).unwrap();
+                        }
+                        SyncMessage::AskUpdate { symbol, price, qty } => {
+                            let mut engine = state.engine.lock().await;
+                            if let Some(book) = engine.get_orderbook_mut(symbol) {
+                                update_level(book, Side::Sell, *price, *qty);
+                            }
+                        }
+                        SyncMessage::Snapshot { symbol, bids, asks } => {
+                            let mut engine = state.engine.lock().await;
+                            if let Some(book) = engine.get_orderbook_mut(symbol) {
+                                *book = OrderBook::new();
+
+                                // Note: For Secondary instances we only store order price and total quantity
+                                for level in bids {
+                                    let order = Order {
+                                        id: 0,
+                                        side: Side::Buy,
+                                        price: level.price,
+                                        qty: level.qty,
+                                    };
+                                    book.add_order(order).unwrap();
+                                }
+                                for level in asks {
+                                    let order = Order {
+                                        id: 0,
+                                        side: Side::Sell,
+                                        price: level.price,
+                                        qty: level.qty,
+                                    };
+                                    book.add_order(order).unwrap();
+                                }
                             }
                         }
                     }
