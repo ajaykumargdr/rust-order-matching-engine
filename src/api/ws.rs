@@ -74,7 +74,7 @@ async fn handle_sync_socket(socket: WebSocket, state: AppState) {
     // Send initial snapshot on connect - send snapshots for all symbols
     let engine = state.engine.lock().await;
     // Todo(refactor): Optimize
-    for (symbol, _book) in &engine.books {
+    for symbol in engine.books.keys() {
         let orderbook_state = super::orderbook_state(&state, symbol).await;
         if let Ok((bids, asks)) = orderbook_state {
             let snapshot = SyncMessage::Snapshot {
