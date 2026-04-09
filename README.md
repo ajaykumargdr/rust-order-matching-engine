@@ -9,6 +9,28 @@ The system follows a **single-writer design**, where all matching happens on a P
 
 ---
 
+## Configuration
+
+### Symbol Configuration
+
+The engine supports multiple trading symbols (e.g., BTC, ETH, SOL). Symbols are configured via `config.json`:
+
+```json
+{
+  "symbols": ["BTC", "ETH", "SOL", "XRP"]
+}
+```
+
+You can override the config file location with the `CONFIG_PATH` environment variable:
+
+```bash
+CONFIG_PATH=/path/to/config.json cargo run
+```
+
+Each symbol has its own isolated orderbook, and orders are matched within their respective symbol's orderbook.
+
+---
+
 ## Core Features
 
 * In-memory matching engine
@@ -29,6 +51,7 @@ Submit a new order
 **Request:**
 ```json
 {
+  "symbol": "BTC",
   "side": "buy",
   "price": 100,
   "qty": 50
@@ -47,11 +70,20 @@ Submit a new order
 
 ### GET /orderbook
 
-Returns the current orderbook (aggregated by price level)
+Returns the current orderbook for a specific symbol
+
+**Query Parameters:**
+- `symbol`: The trading symbol (e.g., "BTC", "ETH")
+
+**Example:**
+```
+GET /orderbook?symbol=BTC
+```
 
 **Response:**
 ```json
 {
+  "symbol": "BTC",
   "bids": [{ "price": 100, "qty": 50 }],
   "asks": []
 }
@@ -99,19 +131,19 @@ IS_PRIMARY=false PRIMARY_URL="http://localhost:3000" PORT=3001 cargo run
 ```bash
 curl -X POST http://localhost:3000/orders \
   -H "Content-Type: application/json" \
-  -d '{"side":"buy","price":100,"qty":50}'
+  -d '{"symbol":"BTC","side":"buy","price":100,"qty":50}'
 ```
 
 **Place order via REPLICA server (forwarded to PRIMARY server):**
 ```bash
 curl -X POST http://localhost:3001/orders \
   -H "Content-Type: application/json" \
-  -d '{"side":"sell","price":100,"qty":30}'
+  -d '{"symbol":"ETH","side":"sell","price":100,"qty":30}'
 ```
 
-**Check orderbook:**
+**Check orderbook for a specific symbol:**
 ```bash
-curl http://localhost:3000/orderbook
+curl "http://localhost:3000/orderbook?symbol=BTC"
 ```
 
 ---
@@ -157,10 +189,17 @@ The orderbook uses:
 * VecDeque for per-price FIFO queues
 
 **Structure:**
-* `bids`: BTreeMap<price, VecDeque<Order>>
-* `asks`: BTreeMap<price, VecDeque<Order>>
+* `Engine`: Contains `HashMap<String, OrderBook>` - one orderbook per symbol
+* Each `OrderBook` has:
+  * `bids`: BTreeMap<price, VecDeque<Order>>
+  * `asks`: BTreeMap<price, VecDeque<Order>>
 
 **Reasoning:**
+
+* Engine with HashMap:
+  * Isolates orderbooks by symbol
+  * Allows independent matching per symbol
+  * Easy to add new symbols
 
 * BTreeMap:
   * Maintains sorted order
@@ -170,7 +209,7 @@ The orderbook uses:
   * Efficient FIFO operations
   * Preserves time priority within a price level
 
-This combination naturally supports price-time priority matching.
+This combination naturally supports price-time priority matching with symbol isolation.
 
 ---
 
